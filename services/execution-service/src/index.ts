@@ -1,6 +1,6 @@
 // algo-bot/services/execution-service/src/index.ts
 
-import { OrderManager } from './services/OrderManger.js';
+import { OrderManager } from './services/OrderManager.js';
 import { UpstoxClient } from './clients/UpstoxClient.js';
 // Pseudo-import for event bus
 // import { RedisEventBus } from '../../shared/utils/RedisEventBus'; 
