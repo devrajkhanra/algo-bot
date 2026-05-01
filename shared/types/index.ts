@@ -45,5 +45,6 @@ export interface MarketTick {
 export enum EventTopic {
   MARKET_TICK = 'market.tick',           // Followed by instrument token: market.tick.NSE_EQ|INE123
   ORDER_INTENT = 'order.intent',         // Published by strategy, consumed by execution/risk
-  ORDER_STATE_UPDATE = 'order.state'     // Published by execution, consumed by strategy/db
+  ORDER_STATE_UPDATE = 'order.state',    // Published by execution, consumed by strategy/db
+  AUTH_TOKEN_UPDATED = 'auth.token_updated'
 }
