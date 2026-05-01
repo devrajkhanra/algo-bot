@@ -1,47 +1,53 @@
-import express from "express";
-import { getAccessToken } from "./auth/token.js";
-import { getCandleData } from "./api/marketData.js";
-import { Candle } from "./types/candle.js";
+// algo-bot/services/execution-service/src/server.ts
 
-export const normalizeCandles = (rawCandles: any[]): Candle[] => {
-    return rawCandles.map((c) => ({
-        time: new Date(c[0]),
-        open: Number(c[1]),
-        high: Number(c[2]),
-        low: Number(c[3]),
-        close: Number(c[4]),
-        volume: Number(c[5]),
-    }));
-};
+import express from 'express';
+import { UpstoxAuth } from './auth/upstoxAuth.js';
+import { UpstoxClient } from './clients/UpstoxClient.js';
+import { OrderManager } from './services/OrderManager.js';
 
 const app = express();
-const PORT = 3000;
+const port = 3000;
+const auth = new UpstoxAuth();
 
-app.get("/", async (req, res) => {
-    const code = req.query.code as string;
+// Global state for the execution service (will move to Redis later)
+export let upstoxClient: UpstoxClient | null = null;
+export let orderManager: OrderManager | null = null;
 
-    if (!code) {
-        return res.send("No code received");
-    }
-
-    console.log("Received code:", code);
-
-    const tokenData = await getAccessToken(code);
-
-    const accessToken = tokenData?.access_token;
-    console.log("Access Token Response:", tokenData);
-
-    if (accessToken) {
-        const candles = await getCandleData(accessToken);
-        console.log("Candle Data:", candles);
-        const raw = candles?.data?.candles || [];
-        const normalized = normalizeCandles(raw);
-        console.log("Normalized Candles:", normalized.slice(0, 5));
-    }
-
-    res.send("Token received! Check console.");
+// 1. Visit this route to start the day
+app.get('/api/auth/login', (req, res) => {
+  const loginUrl = auth.getLoginUrl();
+  console.log(`[Server] Redirecting to Upstox Login...`);
+  res.redirect(loginUrl);
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
+// 2. Upstox redirects back here with the authorization code
+app.get('/api/auth/callback', async (req, res) => {
+  const code = req.query.code as string;
+
+  if (!code) {
+    return res.status(400).send('Authorization code missing.');
+  }
+
+  try {
+    console.log(`[Server] Received Auth Code. Exchanging for Token...`);
+    const accessToken = await auth.getAccessToken(code);
+    
+    // Initialize the core system now that we have a token
+    upstoxClient = new UpstoxClient(accessToken);
+    orderManager = new OrderManager(upstoxClient);
+
+    console.log(`[Server] ✅ System Initialized. Execution Service is LIVE.`);
+    
+    // Test the connection immediately
+    const profile = await upstoxClient.getProfile();
+    res.send(`<h1>Authentication Successful</h1><p>Bot is connected as ${profile.data.user_name}. You may close this window.</p>`);
+    
+  } catch (error) {
+    res.status(500).send('Failed to authenticate with Upstox.');
+  }
+});
+
+app.listen(port, () => {
+  console.log(`🚀 Execution Service Auth Server running on http://localhost:${port}`);
+  console.log(`👉 START YOUR DAY: Visit http://localhost:${port}/api/auth/login to authenticate the bot.`);
 });

@@ -46,4 +46,17 @@ export class UpstoxClient {
       throw error;
     }
   }
+
+  /**
+   * Safe, read-only method to verify API connectivity and token validity.
+   */
+  async getProfile(): Promise<any> {
+    try {
+      const response = await this.client.get('/user/profile');
+      return response.data;
+    } catch (error: any) {
+      console.error(`[UpstoxClient] Profile fetch failed: ${error.response?.data?.message || error.message}`);
+      throw error;
+    }
+  }
 }
