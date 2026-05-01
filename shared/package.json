@@ -1,0 +1,7 @@
+{
+  "name": "@algo-bot/shared",
+  "version": "1.0.0",
+  "description": "Shared contracts and utilities for the Algo Bot",
+  "main": "types/index.ts",
+  "types": "types/index.ts"
+}
