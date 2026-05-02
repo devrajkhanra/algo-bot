@@ -1,14 +1,28 @@
 // algo-bot/services/data-service/src/utils/protobufDecoder.ts
 
-/**
- * MOCK UTILITY: Decodes Upstox Protobuf binary data into JSON.
- * TODO: Implement actual protobuf decoding using Upstox's MarketDataFeed.proto schema
- */
-export function decodeMarketData(buffer: Buffer): any {
-  // In production, this will use protobufjs to decode the buffer.
-  // For now, we return a mocked structure to satisfy the FeedManager.
-  console.warn("Mock protobuf decoder called. Need to implement real schema.");
-  return {
-    feeds: {} 
-  };
+import * as protobuf from 'protobufjs';
+import * as path from 'path';
+
+// Pre-load the schema into memory when the service starts
+const protoPath = path.resolve(__dirname, '../proto/MarketDataFeed.proto');
+const root = protobuf.loadSync(protoPath);
+const FeedResponse = root.lookupType('com.upstox.marketdatafeeder.rpc.proto.FeedResponse');
+
+export function decodeMarketFeed(buffer: Buffer): any {
+  try {
+    // Decode the binary blob
+    const message = FeedResponse.decode(buffer);
+    
+    // Convert it to a readable JavaScript object
+    const decodedObject = FeedResponse.toObject(message, {
+      longs: String,
+      enums: String,
+      bytes: String,
+    });
+    
+    return decodedObject;
+  } catch (error) {
+    console.error('[ProtobufDecoder] Error decoding feed:', error);
+    return null;
+  }
 }

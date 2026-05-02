@@ -43,7 +43,7 @@ app.get('/api/auth/callback', async (req, res) => {
     console.log(`[Server] ✅ System Initialized. Execution Service is LIVE.`);
     
     // ---> NEW: BROADCAST THE TOKEN TO THE REST OF THE SYSTEM <---
-    await redisBus.publish(EventTopic.AUTH_TOKEN_UPDATED, { token: accessToken });
+    await eventBus.publish(EventTopic.AUTH_TOKEN_UPDATED, { token: accessToken });
     console.log(`[Server] 📡 Access Token broadcasted to Redis bus.`);
 
     const profile = await upstoxClient.getProfile();
