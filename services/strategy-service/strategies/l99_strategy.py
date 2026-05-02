@@ -115,17 +115,28 @@ class L99Strategy(BaseStrategy):
     def _handle_fakeout_watch(self, ltp, tick_time):
         """
         PHASE 2B: The breakout happened. Did it fail?
-        L99 Rule: Price must reverse back *inside* the range within a short time (e.g., 10 mins).
+        TRAP RULE: Price reverses back *inside* the range within 10 mins.
+        TREND RULE: Price sustains *outside* the range for 10+ mins.
         """
         time_elapsed = (tick_time - self.fakeout_start_time).total_seconds() / 60.0
 
-        # If it stays outside the range for more than 10 minutes, it's a real trend. Not a trap.
-        if time_elapsed > 10.0:
-            print(f"[{self.strategy_id}] ❌ Trend confirmed. Not a fakeout. Resetting to HUNTING.")
-            self.state = L99State.HUNTING
+        # --- THE NEW TREND CATCHER RULE ---
+        # If it survives outside the range for 10 minutes, the trend is confirmed. Ride it.
+        if time_elapsed >= 10.0:
+            if self.trigger_direction == 'UPSIDE' and ltp > self.orb_high:
+                self.state = L99State.FIRED
+                print(f"[{self.strategy_id}] 🚀 TREND CONFIRMED! 10+ mins above ORB. Entering UPSIDE Trend at {ltp}.")
+            elif self.trigger_direction == 'DOWNSIDE' and ltp < self.orb_low:
+                self.state = L99State.FIRED
+                print(f"[{self.strategy_id}] 🚀 TREND CONFIRMED! 10+ mins below ORB. Entering DOWNSIDE Trend at {ltp}.")
+            else:
+                # Edge case: 10 mins passed but it fell exactly on the line. Reset.
+                print(f"[{self.strategy_id}] ❌ Trend stalled on the boundary. Resetting to HUNTING.")
+                self.state = L99State.HUNTING
             return
 
-        # Check for the Reversal (The Trap is Set)
+        # --- THE ORIGINAL TRAP RULE ---
+        # Check for the rapid Reversal (The Trap is Set)
         if self.trigger_direction == 'UPSIDE' and ltp < self.orb_high:
             self.state = L99State.ARMED
             print(f"[{self.strategy_id}] 🪤 CE BUYERS TRAPPED! Price fell back below {self.orb_high}. System ARMED.")
