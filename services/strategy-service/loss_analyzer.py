@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from indicators import add_adx_indicators
+from strategies.indicators import add_adx_indicators
 
 def analyze_losing_trades(price_df, trades_df):
     """

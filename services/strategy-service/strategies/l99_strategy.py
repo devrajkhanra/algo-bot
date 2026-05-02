@@ -4,12 +4,13 @@ import pandas as pd
 
 # This allows Python to find the indicators.py file located one folder up
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from indicators import add_adx_indicators
-from base_strategy import BaseStrategy 
+from .indicators import add_adx_indicators
+from .base_strategy import BaseStrategy
 
 class L99Strategy(BaseStrategy):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, instrument_token="DUMMY_TOKEN_FOR_BACKTEST"): 
+        # Pass the token up to the BaseStrategy
+        super().__init__(instrument_token) 
         self.name = "L99_ADX_Dynamic_Strategy"
 
     def generate_signals(self, market_data_df):
