@@ -1,166 +1,70 @@
-# algo-bot/services/strategy-service/strategies/l99_strategy.py
+import sys
+import os
+import pandas as pd
 
-from enum import Enum
-import datetime
-from strategies.base_strategy import BaseStrategy
-
-class L99State(Enum):
-    PRE_MARKET = 0          # Before 9:15 AM
-    CALCULATING_ORB = 1     # 9:15 AM to 9:30 AM (Building the range)
-    HUNTING = 2             # 9:30 AM onwards (Waiting for a breakout)
-    FAKEOUT_WATCH = 3       # Price broke out. Waiting to see if it reverses.
-    ARMED = 4               # Price reversed back in. The trap is set.
-    FIRED = 5               # The trap triggered. We are in a trade.
-    DONE_FOR_DAY = 6        # Max trades hit or time is up.
+# This allows Python to find the indicators.py file located one folder up
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from indicators import add_adx_indicators
+from base_strategy import BaseStrategy 
 
 class L99Strategy(BaseStrategy):
-    def __init__(self, instrument_token="NSE_INDEX|Nifty 50"):
-        super().__init__(instrument_token, strategy_id="L99_GAMMA_BLAST")
-        
-        # --- Core State ---
-        self.state = L99State.PRE_MARKET
-        
-        # --- Critical Levels (Calculated dynamically) ---
-        self.orb_high = float('-inf')
-        self.orb_low = float('inf')
-        
-        # --- Trap Variables ---
-        self.trigger_direction = None # 'UPSIDE' or 'DOWNSIDE'
-        self.fakeout_start_time = None
-        
-        # Note: True VWAP requires Volume. Since our current 'ltpc' feed only 
-        # gives price, we will use the pure Price Action High/Low of the first 15 mins.
-        # We can upgrade to a Volume feed later if needed.
+    def __init__(self):
+        super().__init__()
+        self.name = "L99_ADX_Dynamic_Strategy"
 
-    def on_tick(self, tick_data):
+    def generate_signals(self, market_data_df):
         """
-        This is the main router. Every time a Nifty tick arrives, 
-        it checks the current state and routes it to the correct logic block.
+        Analyzes the market data and generates buy/sell signals.
+        Expects a dataframe with Date, Open, High, Low, Close.
         """
-        ltp = tick_data.get('lastTradedPrice', 0.0)
-        timestamp_ms = tick_data.get('timestamp', 0)
-        
-        # Convert timestamp to human-readable IST time
-        tick_time = datetime.datetime.fromtimestamp(timestamp_ms / 1000.0)
-        
-        # Ensure we only process market hours (9:15 AM to 3:30 PM)
-        # (For weekend testing, you can comment this block out later)
-        if tick_time.hour < 9 or (tick_time.hour == 9 and tick_time.minute < 15):
-            self.state = L99State.PRE_MARKET
-            return None
+        if market_data_df.empty or len(market_data_df) < 15:
+            return market_data_df # Not enough data to calculate ADX
             
-        if tick_time.hour >= 15 and tick_time.minute >= 15:
-            if self.state != L99State.DONE_FOR_DAY:
-                print(f"[{self.strategy_id}] 🛑 Market closing. Shutting down for the day.")
-                self.state = L99State.DONE_FOR_DAY
-            return None
-
-        # Route the tick based on the current state
-        if self.state == L99State.PRE_MARKET:
-            self.state = L99State.CALCULATING_ORB
-            print(f"[{self.strategy_id}] 🟢 Market Open! Entering Phase 1: CALCULATING ORB.")
+        # 1. Calculate the ADX for the entire dataset in one extremely fast pass
+        df = add_adx_indicators(market_data_df, length=14)
+        
+        # Create an empty column to store our trading decisions
+        df['Signal'] = 'HOLD'
+        df['Action'] = 'NONE'
+        
+        # 2. Iterate through the data to make day-by-day decisions
+        for index in range(1, len(df)):
+            # Look at YESTERDAY'S indicator values (T-1)
+            yesterday_adx = df['ADX'].iloc[index - 1]
+            yesterday_di_plus = df['DI+'].iloc[index - 1]
+            yesterday_di_minus = df['DI-'].iloc[index - 1]
             
-        elif self.state == L99State.CALCULATING_ORB:
-            self._handle_calculating_orb(ltp, tick_time)
+            # Look at TODAY'S price to decide entry
+            today_close = df['Close'].iloc[index]
             
-        elif self.state == L99State.HUNTING:
-            self._handle_hunting(ltp, tick_time)
+            # --- PROTECTIVE FILTERS (From your Forensic Analysis) ---
             
-        elif self.state == L99State.FAKEOUT_WATCH:
-            self._handle_fakeout_watch(ltp, tick_time)
-            
-        elif self.state == L99State.ARMED:
-            return self._handle_armed(ltp, tick_time)
-
-        return None
-    
-    # ---------------------------------------------------------
-    # STATE LOGIC HANDLERS
-    # ---------------------------------------------------------
-
-    def _handle_calculating_orb(self, ltp, tick_time):
-        """
-        PHASE 1: 9:15 to 9:30. Find the absolute High and Low of the Opening Range.
-        """
-        # Update the High and Low of the day so far
-        if ltp > self.orb_high: self.orb_high = ltp
-        if ltp < self.orb_low:  self.orb_low = ltp
-
-        # Check if 15 minutes have passed
-        if tick_time.minute >= 30:
-            self.state = L99State.HUNTING
-            print(f"[{self.strategy_id}] 🎯 ORB Established! High: {self.orb_high} | Low: {self.orb_low}")
-            print(f"[{self.strategy_id}] 🐺 Transitioning to HUNTING state. Waiting for fakeout...")
-
-
-    def _handle_hunting(self, ltp, tick_time):
-        """
-        PHASE 2A: Price breaks the ORB. Most retail buys here. We watch and wait.
-        """
-        # Upside Breakout Detected
-        if ltp > self.orb_high:
-            self.trigger_direction = 'UPSIDE'
-            self.fakeout_start_time = tick_time
-            self.state = L99State.FAKEOUT_WATCH
-            print(f"[{self.strategy_id}] ⚠️ UPSIDE BREAKOUT at {ltp}. Option buyers rushing in. Watching for reversal.")
-            
-        # Downside Breakout Detected
-        elif ltp < self.orb_low:
-            self.trigger_direction = 'DOWNSIDE'
-            self.fakeout_start_time = tick_time
-            self.state = L99State.FAKEOUT_WATCH
-            print(f"[{self.strategy_id}] ⚠️ DOWNSIDE BREAKOUT at {ltp}. Option buyers rushing in. Watching for reversal.")
-
-
-    def _handle_fakeout_watch(self, ltp, tick_time):
-        """
-        PHASE 2B: The breakout happened. Did it fail?
-        TRAP RULE: Price reverses back *inside* the range within 10 mins.
-        TREND RULE: Price sustains *outside* the range for 10+ mins.
-        """
-        time_elapsed = (tick_time - self.fakeout_start_time).total_seconds() / 60.0
-
-        # --- THE NEW TREND CATCHER RULE ---
-        # If it survives outside the range for 10 minutes, the trend is confirmed. Ride it.
-        if time_elapsed >= 10.0:
-            if self.trigger_direction == 'UPSIDE' and ltp > self.orb_high:
-                self.state = L99State.FIRED
-                print(f"[{self.strategy_id}] 🚀 TREND CONFIRMED! 10+ mins above ORB. Entering UPSIDE Trend at {ltp}.")
-            elif self.trigger_direction == 'DOWNSIDE' and ltp < self.orb_low:
-                self.state = L99State.FIRED
-                print(f"[{self.strategy_id}] 🚀 TREND CONFIRMED! 10+ mins below ORB. Entering DOWNSIDE Trend at {ltp}.")
+            # Filter 1: Total Failure Prevention (Strong Trend Against Us)
+            if yesterday_adx > 25 and yesterday_di_minus > yesterday_di_plus:
+                df.at[index, 'Signal'] = 'AVOID_LONG'
+                df.at[index, 'Action'] = 'Market trending hard down. Skipping long trades.'
+                continue # Skip the rest of the loop for this day
+                
+            # Filter 2: Whipsaw Prevention (Trend Exhaustion)
+            elif yesterday_adx > 40:
+                df.at[index, 'Signal'] = 'TRADE_WITH_TRAILING_STOP'
+                df.at[index, 'Action'] = 'High volatility expected. Take quick profits.'
+                
+            # Filter 3: Late Bloomer Protocol (Trend Winding Up)
+            elif yesterday_adx < 20:
+                df.at[index, 'Signal'] = 'TRADE_WITH_EXTENDED_TIME_STOP'
+                df.at[index, 'Action'] = 'Consolidation. Hold trade 45m longer.'
+                
+            # --- STANDARD L99 ENTRY LOGIC ---
             else:
-                # Edge case: 10 mins passed but it fell exactly on the line. Reset.
-                print(f"[{self.strategy_id}] ❌ Trend stalled on the boundary. Resetting to HUNTING.")
-                self.state = L99State.HUNTING
-            return
+                # Put your normal L99 buy/sell conditions here. 
+                # For example:
+                df.at[index, 'Signal'] = 'STANDARD_TRADE'
+                df.at[index, 'Action'] = 'Normal conditions met.'
 
-        # --- THE ORIGINAL TRAP RULE ---
-        # Check for the rapid Reversal (The Trap is Set)
-        if self.trigger_direction == 'UPSIDE' and ltp < self.orb_high:
-            self.state = L99State.ARMED
-            print(f"[{self.strategy_id}] 🪤 CE BUYERS TRAPPED! Price fell back below {self.orb_high}. System ARMED.")
-            
-        elif self.trigger_direction == 'DOWNSIDE' and ltp > self.orb_low:
-            self.state = L99State.ARMED
-            print(f"[{self.strategy_id}] 🪤 PE BUYERS TRAPPED! Price rose back above {self.orb_low}. System ARMED.")
+        return df
 
-
-    def _handle_armed(self, ltp, tick_time):
-        """
-        PHASE 2C: The Ignition. The option sellers are comfortable. 
-        If price crosses the trigger line *again*, it triggers a massive short-covering squeeze.
-        """
-        if self.trigger_direction == 'UPSIDE' and ltp > self.orb_high:
-            self.state = L99State.FIRED
-            print(f"[{self.strategy_id}] 🔥 GAMMA BLAST IGNITED! Upside trigger {self.orb_high} breached again.")
-            print(f"[{self.strategy_id}] 👉 (In Phase 2, we will buy the CE Option here!)")
-            # return self.create_order_intent(...)  <- We will add this in Sprint 2
-            
-        elif self.trigger_direction == 'DOWNSIDE' and ltp < self.orb_low:
-            self.state = L99State.FIRED
-            print(f"[{self.strategy_id}] 🔥 GAMMA BLAST IGNITED! Downside trigger {self.orb_low} breached again.")
-            print(f"[{self.strategy_id}] 👉 (In Phase 2, we will buy the PE Option here!)")
-            # return self.create_order_intent(...)  <- We will add this in Sprint 2
-            
-        return None
+# For testing this specific file locally
+if __name__ == "__main__":
+    strategy = L99Strategy()
+    print(f"Loaded {strategy.name}")
