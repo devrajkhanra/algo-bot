@@ -1,0 +1,4 @@
+# algo-bot/services/strategy-service/requirements.txt
+redis>=5.0.1
+pandas
+numpy
